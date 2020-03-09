@@ -224,7 +224,20 @@ void arm_write_secure_board_setup_dummy_smc(ARMCPU *cpu,
 {
     AddressSpace *as = arm_boot_address_space(cpu, info);
     int n;
+
     uint32_t mvbar_blob[] = {
+        /* mvbar_addr: secure monitor vectors
+         * switch to hyp mode
+         */
+        0xeafffffe, /* (spin) */
+        0xeafffffe, /* (spin) */
+        0xe3a0fe00 + ((info->board_setup_addr + 0x40) >> 4), /* mov pc, (info->board_setup_addr + 0x40) ;jump to secure monitor */
+        0xeafffffe, /* (spin) */
+        0xeafffffe, /* (spin) */
+        0xeafffffe, /* (spin) */
+        0xeafffffe, /* (spin) */
+        0xeafffffe, /* (spin) */
+
         /* mvbar_addr: secure monitor vectors
          * Default unimplemented and unused vectors to spin. Makes it
          * easier to debug (as opposed to the CPU running away).
@@ -238,19 +251,37 @@ void arm_write_secure_board_setup_dummy_smc(ARMCPU *cpu,
         0xeafffffe, /* (spin) */
         0xeafffffe, /* (spin) */
     };
+
     uint32_t board_setup_blob[] = {
         /* board setup addr */
-        0xee110f51, /* mrc     p15, 0, r0, c1, c1, 2  ;read NSACR */
-        0xe3800b03, /* orr     r0, #0xc00             ;set CP11, CP10 */
-        0xee010f51, /* mcr     p15, 0, r0, c1, c1, 2  ;write NSACR */
-        0xe3a00e00 + (mvbar_addr >> 4), /* mov r0, #mvbar_addr */
-        0xee0c0f30, /* mcr     p15, 0, r0, c12, c0, 1 ;set MVBAR */
-        0xee110f11, /* mrc     p15, 0, r0, c1 , c1, 0 ;read SCR */
-        0xe3800031, /* orr     r0, #0x31              ;enable AW, FW, NS */
-        0xee010f11, /* mcr     p15, 0, r0, c1, c1, 0  ;write SCR */
-        0xe1a0100e, /* mov     r1, lr                 ;save LR across SMC */
-        0xe1600070, /* smc     #0                     ;call monitor to flush SCR */
-        0xe1a0f001, /* mov     pc, r1                 ;return */
+        /*  0 */ 0xee110f51, /* mrc     p15, 0, r0, c1, c1, 2  ;read NSACR */
+        /*  4 */ 0xe3800b03, /* orr     r0, #0xc00             ;set CP11, CP10 */
+        /*  8 */ 0xee010f51, /* mcr     p15, 0, r0, c1, c1, 2  ;write NSACR */
+        /* 12 */ 0xe3a00e00 + (mvbar_addr >> 4), /* mov r0, #mvbar_addr */
+        /* 16 */ 0xee0c0f30, /* mcr     p15, 0, r0, c12, c0, 1 ;set MVBAR */
+        /* 20 */ 0xee110f11, /* mrc     p15, 0, r0, c1 , c1, 0 ;read SCR */
+        /* 24 */ 0xe3800030, /* orr     r0, #0x30              ;enable AW, FW */
+        /* 28 */ 0xee010f11, /* mcr     p15, 0, r0, c1, c1, 0  ;write SCR */
+        /* 32 */ 0xe1a0100e, /* mov     r1, lr                 ;save LR across SMC */
+        /* 36 */ 0xe1600070, /* smc     #0                     ;call monitor to flush SCR */
+        /* 40 */ 0xe1a0f001, /* mov     pc, r1                 ;return */
+    };
+
+    uint32_t secure_monitor_blob[] = {
+        0xee110f11,  /* mrc	15, 0, r0, cr1, cr1, {0}  ;read SCR */
+        0xe3c0004e,  /* bic	r0, r0, #78	; 0x4e        ;clear IRQ, FIQ, EA, nET bits */
+        0xe3800031,  /* orr	r0, r0, #49	; 0x31        ;enable NS, AW, FW bits */
+        0xe3800c01,  /* orr	r0, r0, #256	; 0x100   ;allow HVC instruction */
+        0xee010f11,  /* mcr	15, 0, r0, cr1, cr1, {0}  ;write SCR (with NS bit set) */
+        0xe3a00d07,  /* mov	r0, #448	; 0x1c0       ;Set A, I and F */
+        0xe380001a,  /* orr	r0, r0, #26               ;Slot target mode in */
+        0xe16ff000,  /* msr	SPSR_fsxc, r0             ;Set full SPSR */
+        /* Reset CNTVOFF to 0 before leaving monitor mode */
+        0xe3a00000,  /* mov	r0, #0                    ; */
+        0xec400f4e,  /* mcrr 15, 4, r0, r0, cr14      ;Reset CNTVOFF to zero */
+        0xe3a00e00 + ((mvbar_addr + 0x20) >> 4), /* load address of dummy vector table of secure monitor */
+        0xee0c0f30,  /* mcr	15, 0, r0, cr12, cr0, {1} ;set MVBAR */
+        0xe1b0f00e,  /* movs pc, lr                   ;return to non-secure SVC */
     };
 
     /* check that mvbar_addr is correctly aligned and relocatable (using MOV) */
@@ -271,6 +302,12 @@ void arm_write_secure_board_setup_dummy_smc(ARMCPU *cpu,
     }
     rom_add_blob_fixed_as("board-setup", board_setup_blob,
                           sizeof(board_setup_blob), info->board_setup_addr, as);
+
+    for (n = 0; n < ARRAY_SIZE(secure_monitor_blob); n++) {
+        secure_monitor_blob[n] = tswap32(secure_monitor_blob[n]);
+    }
+    rom_add_blob_fixed_as("secure-monitor-boot", secure_monitor_blob,
+                          sizeof(secure_monitor_blob), info->board_setup_addr + 0x40, as);
 }
 
 static void default_reset_secondary(ARMCPU *cpu,

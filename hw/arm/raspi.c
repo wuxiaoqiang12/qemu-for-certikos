@@ -24,7 +24,7 @@
 
 #define SMPBOOT_ADDR    0x300 /* this should leave enough space for ATAGS */
 #define MVBAR_ADDR      0x400 /* secure vectors */
-#define BOARDSETUP_ADDR (MVBAR_ADDR + 0x20) /* board setup code */
+#define BOARDSETUP_ADDR (MVBAR_ADDR + 0x40) /* board setup code */
 #define FIRMWARE_ADDR_2 0x8000 /* Pi 2 loads kernel.img here by default */
 #define FIRMWARE_ADDR_3 0x80000 /* Pi 3 loads kernel.img here by default */
 #define SPINTABLE_ADDR  0xd8 /* Pi 3 bootloader spintable */
